@@ -1102,9 +1102,29 @@ async def process_vehicle_doc(update: Update, image_b64: str | None,
                 f"❌ Есть замечания по: {', '.join(fails)}"
             )
 
+def _get_ffmpeg_bin() -> tuple[str, str]:
+    """Returns paths to ffmpeg and ffprobe (imageio-ffmpeg first, then PATH)."""
+    import shutil
+    ffmpeg_exe = ffprobe_exe = None
+    try:
+        import imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        ffprobe_exe = shutil.which("ffprobe") or ffmpeg_exe.replace("ffmpeg", "ffprobe")
+        logger.info(f"imageio-ffmpeg: {ffmpeg_exe}")
+    except Exception:
+        pass
+    if not ffmpeg_exe:
+        ffmpeg_exe = shutil.which("ffmpeg") or "ffmpeg"
+        ffprobe_exe = shutil.which("ffprobe") or "ffprobe"
+        logger.info(f"system ffmpeg: {ffmpeg_exe}")
+    return ffmpeg_exe, ffprobe_exe
+
+
 # ─── ИЗВЛЕЧЕНИЕ КАДРОВ ВИДЕО ──────────────────────────────────────────────────
 async def extract_video_frames(video_path: str, max_frames: int = 12) -> list:
     import asyncio as _asyncio
+
+    ffmpeg_bin, ffprobe_bin = _get_ffmpeg_bin()
 
     async def run(*cmd):
         proc = await _asyncio.create_subprocess_exec(
@@ -1125,7 +1145,7 @@ async def extract_video_frames(video_path: str, max_frames: int = 12) -> list:
         duration = 10.0
         try:
             rc, out, err = await run(
-                "ffprobe", "-v", "error",
+                ffprobe_bin, "-v", "error",
                 "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 video_path
@@ -1139,7 +1159,7 @@ async def extract_video_frames(video_path: str, max_frames: int = 12) -> list:
         # Извлекаем кадры
         try:
             rc, out, err = await run(
-                "ffmpeg", "-y", "-i", video_path,
+                ffmpeg_bin, "-y", "-i", video_path,
                 "-vf", f"fps=1/{interval:.1f}",
                 "-vframes", str(max_frames),
                 "-q:v", "3", out_pattern
