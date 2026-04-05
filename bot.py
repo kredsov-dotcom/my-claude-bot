@@ -1331,11 +1331,16 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ─── ЗАПУСК ───────────────────────────────────────────────────────────────────
+async def _post_init(app: Application) -> None:
+    """Start the APScheduler inside the running event loop."""
+    setup_scheduler(app)
+
+
 def main():
     init_db()
     logger.info(f"Запуск Агента Q | модель: {MODEL} | owner_id: {OWNER_ID}")
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(_post_init).build()
 
     # Основные команды
     app.add_handler(CommandHandler("start",      cmd_start))
@@ -1358,9 +1363,6 @@ def main():
     app.add_handler(MessageHandler(filters.Document.VIDEO, handle_video))
     app.add_handler(MessageHandler(filters.Document.ALL,   handle_document))
     app.add_handler(MessageHandler(filters.VOICE,          handle_voice))
-
-    # Планировщик мониторинга (реестр, самоконтроль, фиксированные графики)
-    setup_scheduler(app)
 
     logger.info("Агент Q запущен и ожидает сообщений...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
