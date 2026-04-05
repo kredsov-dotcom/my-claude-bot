@@ -854,39 +854,72 @@ async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("📝 Генерирую отчёт по смене...")
 
-    result_icon = {"ok": "✅", "fail": "❌", "pending": "⏳"}
-    lines = [f"# ОТЧЁТ ПО СМЕНЕ {datetime.now().strftime('%d.%m.%Y')}\n"]
+    # Порядок документов в отчёте
+    REPORT_DOC_ORDER = [
+        ("waybill",   "Путевой лист"),
+        ("driver",    "Фото водителя"),
+        ("dashboard", "Фото панели приборов"),
+        ("video",     "Круговой видеоосмотр автомобиля"),
+    ]
+
+    lines = [f"📋 ОТЧЁТ ПО СМЕНЕ {datetime.now().strftime('%d.%m.%Y')}\n"]
     total_ok = 0
 
     for shift_id, vehicle_num, driver, customer in shifts:
         docs = get_vehicle_docs(shift_id)
-        lines.append(f"\n{'='*40}")
-        lines.append(f"🚛 {vehicle_num}" + (f" | {customer}" if customer else "") + (f" | {driver}" if driver else ""))
-        lines.append(f"{'='*40}")
 
-        vehicle_ok = True
-        for dt in DOC_ORDER:
-            label = DOC_TYPES[dt]
-            if dt in docs:
-                res, analysis = docs[dt]
-                icon = result_icon.get(res, "⏳")
-                if res != "ok":
-                    vehicle_ok = False
-                lines.append(f"\n{icon} {label}")
-                if analysis:
-                    # Первые 500 символов анализа
-                    short = analysis[:500] + ("..." if len(analysis) > 500 else "")
-                    lines.append(short)
-            else:
-                lines.append(f"\n⏳ {label}: НЕ ПОЛУЧЕН")
+        lines.append(f"{'─'*35}")
+        header = f"🚛 {vehicle_num}"
+        if customer:
+            header += f"  |  {customer}"
+        if driver:
+            header += f"  |  {driver}"
+        lines.append(header)
+        lines.append(f"{'─'*35}")
+
+        # 1. Отчёт — есть ли хоть один документ
+        has_report = len(docs) > 0
+        lines.append(f"1. Отчёт: {'✅ есть' if has_report else '❌ нет'}")
+
+        # 2. Комплектность — все 4 типа документов получены
+        missing_docs = [DOC_TYPES[dt] for dt in DOC_ORDER if dt not in docs]
+        is_complete = len(missing_docs) == 0
+        if is_complete:
+            lines.append("2. Комплектность документов: ✅ полная")
+        else:
+            lines.append("2. Комплектность документов: ❌ неполная")
+            for m in missing_docs:
+                lines.append(f"   • не получен: {m}")
+
+        # 3-6. По каждому типу документа
+        vehicle_ok = is_complete
+        for i, (doc_type, label) in enumerate(REPORT_DOC_ORDER, start=3):
+            if doc_type not in docs:
+                lines.append(f"{i}. {label}: ⏳ не получен")
                 vehicle_ok = False
+            else:
+                result, analysis = docs[doc_type]
+                if result == "ok":
+                    lines.append(f"{i}. {label}: ✅ замечаний нет")
+                elif result == "fail":
+                    lines.append(f"{i}. {label}: ❌ есть замечания")
+                    vehicle_ok = False
+                    if analysis:
+                        for remark in analysis.strip().split("\n"):
+                            remark = remark.strip(" -•–—")
+                            if remark:
+                                lines.append(f"   • {remark}")
+                else:
+                    lines.append(f"{i}. {label}: ⏳ в обработке")
+                    vehicle_ok = False
 
-        lines.append(f"\n→ Итог: {'✅ К ВЫЕЗДУ ДОПУЩЕН' if vehicle_ok else '❌ ЕСТЬ ЗАМЕЧАНИЯ'}")
+        lines.append(f"→ {'✅ К ВЫЕЗДУ ДОПУЩЕН' if vehicle_ok else '❌ ЕСТЬ ЗАМЕЧАНИЯ'}")
+        lines.append("")
         if vehicle_ok:
             total_ok += 1
 
-    lines.append(f"\n{'='*40}")
-    lines.append(f"ИТОГО: {total_ok}/{len(shifts)} автомобилей готовы к выезду")
+    lines.append(f"{'─'*35}")
+    lines.append(f"ИТОГО: {total_ok}/{len(shifts)} а/м готовы к выезду")
     lines.append(f"Время отчёта: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
 
     await send_long(update, "\n".join(lines))
