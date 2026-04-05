@@ -1,5 +1,5 @@
 python-telegram-bot==20.7
 anthropic>=0.40.0
 ffmpeg-python>=0.2.0
-apscheduler>=3.10.4
+apscheduler>=3.10.4,<4.0
 pytz>=2024.2
