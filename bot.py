@@ -1104,32 +1104,60 @@ async def process_vehicle_doc(update: Update, image_b64: str | None,
 
 # ─── ИЗВЛЕЧЕНИЕ КАДРОВ ВИДЕО ──────────────────────────────────────────────────
 async def extract_video_frames(video_path: str, max_frames: int = 12) -> list:
+    import asyncio as _asyncio
+
+    async def run(*cmd):
+        proc = await _asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=_asyncio.subprocess.PIPE,
+            stderr=_asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await _asyncio.wait_for(proc.communicate(), timeout=90)
+        return proc.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+
     frames = []
-    with tempfile.TemporaryDirectory() as tmp_dir:
+    tmp_dir_obj = tempfile.TemporaryDirectory()
+    tmp_dir = tmp_dir_obj.name
+    try:
         out_pattern = os.path.join(tmp_dir, "frame_%03d.jpg")
+
+        # Определяем длительность
+        duration = 10.0
         try:
-            result = subprocess.run(
-                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                 "-of", "default=noprint_wrappers=1:nokey=1", video_path],
-                capture_output=True, text=True, timeout=30
+            rc, out, err = await run(
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                video_path
             )
-            duration = float(result.stdout.strip() or "10")
-        except Exception:
-            duration = 10.0
+            duration = float(out.strip() or "10")
+        except Exception as e:
+            logger.warning(f"ffprobe failed: {e}")
 
         interval = max(1.0, duration / max_frames)
+
+        # Извлекаем кадры
         try:
-            subprocess.run(
-                ["ffmpeg", "-i", video_path, "-vf", f"fps=1/{interval:.1f}",
-                 "-vframes", str(max_frames), "-q:v", "3", out_pattern],
-                capture_output=True, timeout=60
+            rc, out, err = await run(
+                "ffmpeg", "-y", "-i", video_path,
+                "-vf", f"fps=1/{interval:.1f}",
+                "-vframes", str(max_frames),
+                "-q:v", "3", out_pattern
             )
+            if rc != 0:
+                logger.error(f"ffmpeg exit {rc}. stderr: {err[-500:]}")
+        except FileNotFoundError:
+            logger.error("ffmpeg not found — не установлен в Railway?")
+            return []
         except Exception as e:
-            logger.error(f"ffmpeg error: {e}")
+            logger.error(f"ffmpeg exception: {e}")
             return []
 
         for f in sorted(Path(tmp_dir).glob("frame_*.jpg"))[:max_frames]:
             frames.append(base64.b64encode(f.read_bytes()).decode())
+
+    finally:
+        tmp_dir_obj.cleanup()
 
     return frames
 
